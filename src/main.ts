@@ -1,11 +1,13 @@
 import "./style.css";
 
-// Describe the core elements needed to build the paint app's layout.
+// Core elements/buttons needed to build the paint app's layout.
 interface PaintAppElements {
   root: HTMLElement;
   title: HTMLHeadingElement;
   canvas: HTMLCanvasElement;
   clearButton: HTMLButtonElement;
+  undoButton: HTMLButtonElement;
+  redoButton: HTMLButtonElement;
 }
 
 // Basic configuration values for the UI.
@@ -25,9 +27,10 @@ type Stroke = Point[];
 // Collection of all recorded strokes.
 interface DrawingModel {
   strokes: Stroke[];
+  redoStack: Stroke[];
 }
 
-// Build the heading element that labels the program in browser.
+// Builds the heading element that labels the program in browser.
 const createTitle = (text: string): HTMLHeadingElement => {
   const heading = document.createElement("h1");
   heading.id = "app-title";
@@ -35,7 +38,7 @@ const createTitle = (text: string): HTMLHeadingElement => {
   return heading;
 };
 
-// Build the canvas element that will host the drawing surface.
+// Builds the canvas element that will host the drawing surface.
 const createCanvas = (size: number): HTMLCanvasElement => {
   const canvas = document.createElement("canvas");
   canvas.id = "paint-canvas";
@@ -45,10 +48,12 @@ const createCanvas = (size: number): HTMLCanvasElement => {
   return canvas;
 };
 
-// Build a container that holds paint controls, starting with a clear button.
+// Container that holds paint controls.
 const createControls = (): {
   controls: HTMLDivElement;
   clearButton: HTMLButtonElement;
+  undoButton: HTMLButtonElement;
+  redoButton: HTMLButtonElement;
 } => {
   const controls = document.createElement("div");
   controls.id = "controls";
@@ -58,9 +63,19 @@ const createControls = (): {
   clearButton.type = "button";
   clearButton.textContent = "Clear Canvas";
 
-  controls.append(clearButton);
+  const undoButton = document.createElement("button");
+  undoButton.id = "undo-button";
+  undoButton.type = "button";
+  undoButton.textContent = "Undo";
 
-  return { controls, clearButton };
+  const redoButton = document.createElement("button");
+  redoButton.id = "redo-button";
+  redoButton.type = "button";
+  redoButton.textContent = "Redo";
+
+  controls.append(clearButton, undoButton, redoButton);
+
+  return { controls, clearButton, undoButton, redoButton };
 };
 
 // Assemble the page layout and return references to the created elements.
@@ -70,11 +85,11 @@ const initializeLayout = (): PaintAppElements => {
 
   const title = createTitle(APP_TITLE);
   const canvas = createCanvas(CANVAS_SIZE);
-  const { controls, clearButton } = createControls();
+  const { controls, clearButton, undoButton, redoButton } = createControls();
 
   root.append(title, controls, canvas);
 
-  return { root, title, canvas, clearButton };
+  return { root, title, canvas, clearButton, undoButton, redoButton };
 };
 
 // Track whether the user is currently dragging the mouse to record a stroke.
@@ -104,6 +119,10 @@ const enableDrawing = (
   const startDrawing = (event: MouseEvent): void => {
     interaction.isDrawing = true;
     const firstPoint = toCanvasPoint(canvas, event);
+
+    // Starting a new stroke invalidates redo history, so reset it here.
+    model.redoStack.length = 0;
+
     model.strokes.push([firstPoint]);
     canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
   };
@@ -171,25 +190,51 @@ const attachClearHandler = (
 ): void => {
   button.addEventListener("click", () => {
     model.strokes.length = 0;
+    model.redoStack.length = 0;
     canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
   });
 };
 
-// Kick off the UI creation and register paint behavior when the module loads.
+// Wire up undo and redo buttons to maintain drawing history stacks.
+const attachUndoRedoHandlers = (
+  undoButton: HTMLButtonElement,
+  redoButton: HTMLButtonElement,
+  canvas: HTMLCanvasElement,
+  model: DrawingModel,
+): void => {
+  // Move the most recent stroke to the redo stack and refresh the canvas.
+  undoButton.addEventListener("click", () => {
+    const undoneStroke = model.strokes.pop();
+    if (!undoneStroke) return;
+    model.redoStack.push(undoneStroke);
+    canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
+  });
+
+  // Restore the most recently undone stroke to the main history and redraw.
+  redoButton.addEventListener("click", () => {
+    const restoredStroke = model.redoStack.pop();
+    if (!restoredStroke) return;
+    model.strokes.push(restoredStroke);
+    canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
+  });
+};
+
+// starts the UI creation and register paint behavior when the module loads.
 const main = (): void => {
-  const { canvas, clearButton } = initializeLayout();
+  const { canvas, clearButton, undoButton, redoButton } = initializeLayout();
   const context = canvas.getContext("2d");
 
   if (!context) {
     throw new Error("Canvas 2D context unavailable.");
   }
 
-  const model: DrawingModel = { strokes: [] };
+  const model: DrawingModel = { strokes: [], redoStack: [] };
 
   enableDrawing(canvas, model);
   attachDrawingObserver(canvas, context, model);
   attachClearHandler(clearButton, canvas, model);
+  attachUndoRedoHandlers(undoButton, redoButton, canvas, model);
 };
 
-// Kick off the UI creation when the module loads.
+// starts the UI creation when the module loads.
 main();
