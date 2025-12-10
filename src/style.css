@@ -31,6 +31,44 @@ body {
   align-items: center;
 }
 
+/* Group that holds the marker selection buttons. */
+#tool-group {
+  display: flex;
+  gap: 8px;
+}
+
+/* Shared styling for selectable marker buttons. */
+.tool-button {
+  padding: 10px 12px;
+  border: 1px solid #111827;
+  border-radius: 8px;
+  background-color: #ffffff;
+  color: #111827;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 0.08s ease,
+    box-shadow 0.08s ease,
+    background-color 0.12s ease;
+}
+
+.tool-button:hover {
+  background-color: #f3f4f6;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.tool-button:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+/* Highlight the active marker tool. */
+.selected-tool {
+  background-color: #111827;
+  color: #f9fafb;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.16);
+}
+
 /* Styling for the clear button to make it stand out on the page. */
 #clear-button {
   padding: 10px 14px;
