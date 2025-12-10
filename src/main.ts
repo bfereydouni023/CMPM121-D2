@@ -35,6 +35,12 @@ const STICKER_FONT = "40px serif";
 // All default sticker options live in this single array so the UI can build
 // every button from data instead of duplicated markup code.
 const STICKER_OPTIONS = ["✨", "🎨", "🍃", "🌼"];
+// Each marker stroke can lean into a a random color. limited the range so it randomizes bright colors.
+const randomMarkerColor = (): string =>
+  `hsl(${Math.floor(Math.random() * 360)}, 75%, 45%)`;
+// Stickers spin by a random rotation. can do multiple clicks to show different angles.
+const randomStickerRotation = (): number =>
+  (Math.random() * 120 - 60) * (Math.PI / 180);
 
 // Represent a point recorded from the user's cursor.
 interface Point {
@@ -73,8 +79,10 @@ interface ToolPreviewState {
 }
 
 // Configuration for marker and sticker tools so the UI can respond to the active selection.
-type MarkerTool = { type: "marker"; thickness: number };
-type StickerTool = { type: "sticker"; emoji: string };
+// Marker configuration now includes a color so each stroke can be unique.
+type MarkerTool = { type: "marker"; thickness: number; color: string };
+// Stickers track a rotation so each placement can spin independently.
+type StickerTool = { type: "sticker"; emoji: string; rotation: number };
 type PaintTool = MarkerTool | StickerTool;
 
 // Factory that produces a marker line command backed by a list of recorded points.
@@ -83,6 +91,7 @@ type PaintTool = MarkerTool | StickerTool;
 const createMarkerLine = (
   initialPoint: Point,
   thickness: number,
+  color: string,
 ): MarkerLine => {
   const points: Point[] = [initialPoint];
 
@@ -97,7 +106,7 @@ const createMarkerLine = (
       context.save();
       context.lineWidth = thickness;
       context.lineCap = "round";
-      context.strokeStyle = "#111827";
+      context.strokeStyle = color;
 
       context.beginPath();
       const [first, ...rest] = points;
@@ -118,12 +127,16 @@ const createMarkerLine = (
 };
 
 // Factory for the hover preview; draws a simple outline circle matching the marker size.
-const createMarkerPreview = (point: Point, thickness: number): ToolPreview => ({
+const createMarkerPreview = (
+  point: Point,
+  thickness: number,
+  color: string,
+): ToolPreview => ({
   draw: (context: CanvasRenderingContext2D): void => {
     context.save();
 
     // A light outline shows the user how thick the next stroke will be without adding a line.
-    context.strokeStyle = "#9CA3AF";
+    context.strokeStyle = color;
     context.lineWidth = 1;
     context.beginPath();
     context.arc(point.x, point.y, thickness / 2, 0, Math.PI * 2);
@@ -142,6 +155,7 @@ const createToolPreviewState = (): ToolPreviewState => ({
 const createStickerCommand = (
   emoji: string,
   point: Point,
+  rotation: number,
 ): DraggableCommand => {
   let current = point;
 
@@ -151,24 +165,32 @@ const createStickerCommand = (
     },
     display: (context: CanvasRenderingContext2D): void => {
       context.save();
+      context.translate(current.x, current.y);
+      context.rotate(rotation);
       context.font = STICKER_FONT;
       context.textAlign = "center";
       context.textBaseline = "middle";
-      context.fillText(emoji, current.x, current.y);
+      context.fillText(emoji, 0, 0);
       context.restore();
     },
   };
 };
 
 // Preview command that shows a ghosted sticker under the cursor before committing it.
-const createStickerPreview = (emoji: string, point: Point): ToolPreview => ({
+const createStickerPreview = (
+  emoji: string,
+  point: Point,
+  rotation: number,
+): ToolPreview => ({
   draw: (context: CanvasRenderingContext2D): void => {
     context.save();
     context.globalAlpha = 0.65;
+    context.translate(point.x, point.y);
+    context.rotate(rotation);
     context.font = STICKER_FONT;
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.fillText(emoji, point.x, point.y);
+    context.fillText(emoji, 0, 0);
     context.restore();
   },
 });
@@ -381,8 +403,21 @@ const attachToolSelector = (
   getActiveTool: () => PaintTool;
   registerStickerButton: (button: HTMLButtonElement, emoji: string) => void;
 } => {
+  // Quick helpers generate new tool configs with their randomized flair.
+  const createMarkerTool = (thickness: number): MarkerTool => ({
+    type: "marker",
+    thickness,
+    color: randomMarkerColor(),
+  });
+
+  const createStickerTool = (emoji: string): StickerTool => ({
+    type: "sticker",
+    emoji,
+    rotation: randomStickerRotation(),
+  });
+
   const selection: ToolSelection = {
-    activeTool: { type: "marker", thickness: THIN_MARKER_THICKNESS },
+    activeTool: createMarkerTool(THIN_MARKER_THICKNESS),
   };
 
   // Track all sticker buttons so dynamically added stickers can reuse the
@@ -404,20 +439,14 @@ const attachToolSelector = (
     canvas.dispatchEvent(new Event(TOOL_MOVED_EVENT));
   };
 
-  chooseTool(thinButton, { type: "marker", thickness: THIN_MARKER_THICKNESS });
+  chooseTool(thinButton, createMarkerTool(THIN_MARKER_THICKNESS));
 
   thinButton.addEventListener("click", () => {
-    chooseTool(thinButton, {
-      type: "marker",
-      thickness: THIN_MARKER_THICKNESS,
-    });
+    chooseTool(thinButton, createMarkerTool(THIN_MARKER_THICKNESS));
   });
 
   thickButton.addEventListener("click", () => {
-    chooseTool(thickButton, {
-      type: "marker",
-      thickness: THICK_MARKER_THICKNESS,
-    });
+    chooseTool(thickButton, createMarkerTool(THICK_MARKER_THICKNESS));
   });
 
   const registerStickerButton = (
@@ -426,7 +455,7 @@ const attachToolSelector = (
   ): void => {
     stickerRegistry.push(button);
     button.addEventListener("click", () => {
-      chooseTool(button, { type: "sticker", emoji });
+      chooseTool(button, createStickerTool(emoji));
     });
   };
 
@@ -483,9 +512,13 @@ const enableDrawing = (
 
     const tool = getActiveTool();
     if (tool.type === "marker") {
-      model.commands.push(createMarkerLine(firstPoint, tool.thickness));
+      model.commands.push(
+        createMarkerLine(firstPoint, tool.thickness, tool.color),
+      );
     } else {
-      model.commands.push(createStickerCommand(tool.emoji, firstPoint));
+      model.commands.push(
+        createStickerCommand(tool.emoji, firstPoint, tool.rotation),
+      );
     }
     canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
   };
@@ -525,8 +558,8 @@ const attachToolPreview = (
     const point = toCanvasPoint(canvas, event);
     const tool = getActiveTool();
     previewState.active = tool.type === "marker"
-      ? createMarkerPreview(point, tool.thickness)
-      : createStickerPreview(tool.emoji, point);
+      ? createMarkerPreview(point, tool.thickness, tool.color)
+      : createStickerPreview(tool.emoji, point, tool.rotation);
     canvas.dispatchEvent(new Event(TOOL_MOVED_EVENT));
   };
 
