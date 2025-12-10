@@ -37,6 +37,12 @@ body {
   gap: 8px;
 }
 
+/* Row of sticker buttons grouped separately from markers. */
+#sticker-group {
+  display: flex;
+  gap: 6px;
+}
+
 /* Shared styling for selectable marker buttons. */
 .tool-button {
   padding: 10px 12px;

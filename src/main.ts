@@ -10,6 +10,7 @@ interface PaintAppElements {
   redoButton: HTMLButtonElement;
   thinButton: HTMLButtonElement;
   thickButton: HTMLButtonElement;
+  stickerButtons: HTMLButtonElement[];
 }
 
 // Basic configuration values for the UI.
@@ -19,6 +20,9 @@ const DRAWING_CHANGED_EVENT = "drawing-changed";
 const TOOL_MOVED_EVENT = "tool-moved";
 const THIN_MARKER_THICKNESS = 4;
 const THICK_MARKER_THICKNESS = 10;
+// Sticker visuals share a consistent size and a curated set of emoji choices.
+const STICKER_FONT = "32px serif";
+const STICKER_OPTIONS = ["🌸", "🎈", "⭐"];
 
 // Represent a point recorded from the user's cursor.
 interface Point {
@@ -31,27 +35,35 @@ interface DrawCommand {
   display: (context: CanvasRenderingContext2D) => void;
 }
 
-// Renderable hint shown while hovering the tool, an outline of the marker size.
+// Draw commands that respond to dragging so they can be repositioned as the mouse moves.
+interface DraggableCommand extends DrawCommand {
+  drag: (x: number, y: number) => void;
+}
+
+// Renderable hint shown while hovering the tool, such as an outline or a ghosted sticker.
 interface ToolPreview {
   draw: (context: CanvasRenderingContext2D) => void;
 }
 
 // Specialized draw command that records freehand marker strokes.
 // The drag method grows the line with additional positions as the user moves.
-interface MarkerLine extends DrawCommand {
-  drag: (x: number, y: number) => void;
-}
+interface MarkerLine extends DraggableCommand {}
 
 // Collection of all recorded draw commands.
 interface DrawingModel {
-  commands: MarkerLine[];
-  redoStack: MarkerLine[];
+  commands: DraggableCommand[];
+  redoStack: DraggableCommand[];
 }
 
 // Stores the current preview renderer so the UI can redraw it as the cursor moves.
 interface ToolPreviewState {
   active: ToolPreview | null;
 }
+
+// Configuration for marker and sticker tools so the UI can respond to the active selection.
+type MarkerTool = { type: "marker"; thickness: number };
+type StickerTool = { type: "sticker"; emoji: string };
+type PaintTool = MarkerTool | StickerTool;
 
 // Factory that produces a marker line command backed by a list of recorded points.
 // The returned object exposes a drag method to extend the line and a display method
@@ -114,6 +126,41 @@ const createToolPreviewState = (): ToolPreviewState => ({
   active: null,
 });
 
+// Factory for sticker placement so users can drag the emoji to a final position.
+const createStickerCommand = (
+  emoji: string,
+  point: Point,
+): DraggableCommand => {
+  let current = point;
+
+  return {
+    drag: (x: number, y: number): void => {
+      current = { x, y };
+    },
+    display: (context: CanvasRenderingContext2D): void => {
+      context.save();
+      context.font = STICKER_FONT;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(emoji, current.x, current.y);
+      context.restore();
+    },
+  };
+};
+
+// Preview command that shows a ghosted sticker under the cursor before committing it.
+const createStickerPreview = (emoji: string, point: Point): ToolPreview => ({
+  draw: (context: CanvasRenderingContext2D): void => {
+    context.save();
+    context.globalAlpha = 0.65;
+    context.font = STICKER_FONT;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(emoji, point.x, point.y);
+    context.restore();
+  },
+});
+
 // Builds the heading element that labels the program in browser.
 const createTitle = (text: string): HTMLHeadingElement => {
   const heading = document.createElement("h1");
@@ -140,6 +187,7 @@ const createControls = (): {
   redoButton: HTMLButtonElement;
   thinButton: HTMLButtonElement;
   thickButton: HTMLButtonElement;
+  stickerButtons: HTMLButtonElement[];
 } => {
   const controls = document.createElement("div");
   controls.id = "controls";
@@ -161,6 +209,19 @@ const createControls = (): {
 
   toolGroup.append(thinButton, thickButton);
 
+  const stickerGroup = document.createElement("div");
+  stickerGroup.id = "sticker-group";
+
+  const stickerButtons = STICKER_OPTIONS.map((emoji) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tool-button";
+    button.textContent = emoji;
+    button.setAttribute("aria-label", `${emoji} sticker`);
+    stickerGroup.append(button);
+    return button;
+  });
+
   const clearButton = document.createElement("button");
   clearButton.id = "clear-button";
   clearButton.type = "button";
@@ -176,7 +237,7 @@ const createControls = (): {
   redoButton.type = "button";
   redoButton.textContent = "Redo";
 
-  controls.append(toolGroup, clearButton, undoButton, redoButton);
+  controls.append(toolGroup, stickerGroup, clearButton, undoButton, redoButton);
 
   return {
     controls,
@@ -185,6 +246,7 @@ const createControls = (): {
     redoButton,
     thinButton,
     thickButton,
+    stickerButtons,
   };
 };
 
@@ -202,6 +264,7 @@ const initializeLayout = (): PaintAppElements => {
     redoButton,
     thinButton,
     thickButton,
+    stickerButtons,
   } = createControls();
 
   root.append(title, controls, canvas);
@@ -215,6 +278,7 @@ const initializeLayout = (): PaintAppElements => {
     redoButton,
     thinButton,
     thickButton,
+    stickerButtons,
   };
 };
 
@@ -223,9 +287,9 @@ interface InteractionState {
   isDrawing: boolean;
 }
 
-// Shared tool selection state that tracks which marker thickness is active.
+// Shared tool selection state that tracks which tool is active.
 interface ToolSelection {
-  activeThickness: number;
+  activeTool: PaintTool;
 }
 
 // Convert a mouse event's location to canvas-relative coordinates.
@@ -240,48 +304,65 @@ const toCanvasPoint = (
   };
 };
 
-// Set up the marker tool buttons and return a callback that reports the current
-// thickness. Each button click updates the stored value and the visual
-// selection state.
+// Set up the tool buttons and return a callback that reports the current selection.
+// Each button click updates the stored value, toggles visual selection, and
+// notifies the canvas so previews can refresh.
 const attachToolSelector = (
+  canvas: HTMLCanvasElement,
   thinButton: HTMLButtonElement,
   thickButton: HTMLButtonElement,
-): () => number => {
+  stickerButtons: HTMLButtonElement[],
+  previewState: ToolPreviewState,
+): () => PaintTool => {
   const selection: ToolSelection = {
-    activeThickness: THIN_MARKER_THICKNESS,
+    activeTool: { type: "marker", thickness: THIN_MARKER_THICKNESS },
   };
 
   const applySelectionStyles = (activeButton: HTMLButtonElement): void => {
-    const buttons = [thinButton, thickButton];
+    const buttons = [thinButton, thickButton, ...stickerButtons];
     buttons.forEach((button) => {
       const isActive = button === activeButton;
       button.classList.toggle("selected-tool", isActive);
     });
   };
 
-  const chooseTool = (button: HTMLButtonElement, thickness: number): void => {
-    selection.activeThickness = thickness;
+  const chooseTool = (button: HTMLButtonElement, tool: PaintTool): void => {
+    selection.activeTool = tool;
+    previewState.active = null;
     applySelectionStyles(button);
+    canvas.dispatchEvent(new Event(TOOL_MOVED_EVENT));
   };
 
-  chooseTool(thinButton, THIN_MARKER_THICKNESS);
+  chooseTool(thinButton, { type: "marker", thickness: THIN_MARKER_THICKNESS });
 
   thinButton.addEventListener("click", () => {
-    chooseTool(thinButton, THIN_MARKER_THICKNESS);
+    chooseTool(thinButton, {
+      type: "marker",
+      thickness: THIN_MARKER_THICKNESS,
+    });
   });
 
   thickButton.addEventListener("click", () => {
-    chooseTool(thickButton, THICK_MARKER_THICKNESS);
+    chooseTool(thickButton, {
+      type: "marker",
+      thickness: THICK_MARKER_THICKNESS,
+    });
   });
 
-  return () => selection.activeThickness;
+  stickerButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      chooseTool(button, { type: "sticker", emoji: button.textContent ?? "" });
+    });
+  });
+
+  return () => selection.activeTool;
 };
 
 // Attach mouse listeners that record points into the drawing model.
 const enableDrawing = (
   canvas: HTMLCanvasElement,
   model: DrawingModel,
-  getActiveThickness: () => number,
+  getActiveTool: () => PaintTool,
   interaction: InteractionState,
   previewState: ToolPreviewState,
 ): void => {
@@ -294,7 +375,12 @@ const enableDrawing = (
     // Starting a new stroke invalidates redo history, so reset it here.
     model.redoStack.length = 0;
 
-    model.commands.push(createMarkerLine(firstPoint, getActiveThickness()));
+    const tool = getActiveTool();
+    if (tool.type === "marker") {
+      model.commands.push(createMarkerLine(firstPoint, tool.thickness));
+    } else {
+      model.commands.push(createStickerCommand(tool.emoji, firstPoint));
+    }
     canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
   };
 
@@ -319,7 +405,7 @@ const enableDrawing = (
 // Updates the hover preview on cursor movement without committing a stroke.
 const attachToolPreview = (
   canvas: HTMLCanvasElement,
-  getActiveThickness: () => number,
+  getActiveTool: () => PaintTool,
   interaction: InteractionState,
   previewState: ToolPreviewState,
 ): void => {
@@ -331,7 +417,10 @@ const attachToolPreview = (
     }
 
     const point = toCanvasPoint(canvas, event);
-    previewState.active = createMarkerPreview(point, getActiveThickness());
+    const tool = getActiveTool();
+    previewState.active = tool.type === "marker"
+      ? createMarkerPreview(point, tool.thickness)
+      : createStickerPreview(tool.emoji, point);
     canvas.dispatchEvent(new Event(TOOL_MOVED_EVENT));
   };
 
@@ -414,6 +503,7 @@ const main = (): void => {
     redoButton,
     thinButton,
     thickButton,
+    stickerButtons,
   } = initializeLayout();
   const context = canvas.getContext("2d");
 
@@ -424,10 +514,16 @@ const main = (): void => {
   const model: DrawingModel = { commands: [], redoStack: [] };
   const interaction: InteractionState = { isDrawing: false };
   const previewState = createToolPreviewState();
-  const getActiveThickness = attachToolSelector(thinButton, thickButton);
+  const getActiveTool = attachToolSelector(
+    canvas,
+    thinButton,
+    thickButton,
+    stickerButtons,
+    previewState,
+  );
 
-  enableDrawing(canvas, model, getActiveThickness, interaction, previewState);
-  attachToolPreview(canvas, getActiveThickness, interaction, previewState);
+  enableDrawing(canvas, model, getActiveTool, interaction, previewState);
+  attachToolPreview(canvas, getActiveTool, interaction, previewState);
   attachDrawingObserver(canvas, context, model, previewState);
   attachClearHandler(clearButton, canvas, model);
   attachUndoRedoHandlers(undoButton, redoButton, canvas, model);
