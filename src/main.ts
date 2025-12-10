@@ -25,13 +25,16 @@ const CANVAS_SIZE = 256;
 const EXPORT_CANVAS_SIZE = 1024;
 const DRAWING_CHANGED_EVENT = "drawing-changed";
 const TOOL_MOVED_EVENT = "tool-moved";
-const THIN_MARKER_THICKNESS = 4;
-const THICK_MARKER_THICKNESS = 10;
-// Sticker visuals share a consistent size and a curated set of emoji choices.
-const STICKER_FONT = "32px serif";
+// Tuned marker widths: the thin marker gives precise control while the thick
+// marker lays down bold strokes for filling space quickly.
+const THIN_MARKER_THICKNESS = 3;
+const THICK_MARKER_THICKNESS = 14;
+// Sticker visuals share a slightly larger, friendlier size and a refreshed set
+// of emoji choices to keep the sketchbook playful out of the box.
+const STICKER_FONT = "40px serif";
 // All default sticker options live in this single array so the UI can build
 // every button from data instead of duplicated markup code.
-const STICKER_OPTIONS = ["🌸", "🎈", "⭐"];
+const STICKER_OPTIONS = ["✨", "🎨", "🍃", "🌼"];
 
 // Represent a point recorded from the user's cursor.
 interface Point {
