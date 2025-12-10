@@ -12,7 +12,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   padding: 32px 16px 48px;
   box-sizing: border-box;
 }
@@ -22,6 +22,38 @@ body {
   margin: 0;
   font-size: clamp(28px, 2vw + 18px, 36px);
   letter-spacing: 0.02em;
+}
+
+/* Toolbar area that holds paint actions such as clearing the canvas. */
+#controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* Styling for the clear button to make it stand out on the page. */
+#clear-button {
+  padding: 10px 14px;
+  border: 1px solid #111827;
+  border-radius: 8px;
+  background-color: #111827;
+  color: #f9fafb;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 0.08s ease,
+    box-shadow 0.08s ease,
+    background-color 0.12s ease;
+}
+
+#clear-button:hover {
+  background-color: #1f2937;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+#clear-button:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
 }
 
 /* Canvas sizing and visual treatments for the paint area. */
