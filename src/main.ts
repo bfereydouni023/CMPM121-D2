@@ -14,6 +14,8 @@ interface PaintAppElements {
   thinButton: HTMLButtonElement;
   thickButton: HTMLButtonElement;
   stickerButtons: HTMLButtonElement[];
+  customStickerButton: HTMLButtonElement;
+  stickerGroup: HTMLDivElement;
 }
 
 // Basic configuration values for the UI.
@@ -25,6 +27,8 @@ const THIN_MARKER_THICKNESS = 4;
 const THICK_MARKER_THICKNESS = 10;
 // Sticker visuals share a consistent size and a curated set of emoji choices.
 const STICKER_FONT = "32px serif";
+// All default sticker options live in this single array so the UI can build
+// every button from data instead of duplicated markup code.
 const STICKER_OPTIONS = ["🌸", "🎈", "⭐"];
 
 // Represent a point recorded from the user's cursor.
@@ -192,6 +196,8 @@ const createControls = (): {
   thinButton: HTMLButtonElement;
   thickButton: HTMLButtonElement;
   stickerButtons: HTMLButtonElement[];
+  customStickerButton: HTMLButtonElement;
+  stickerGroup: HTMLDivElement;
 } => {
   const toolColumn = document.createElement("div");
   toolColumn.id = "tool-column";
@@ -216,15 +222,31 @@ const createControls = (): {
   const stickerGroup = document.createElement("div");
   stickerGroup.id = "sticker-group";
 
-  const stickerButtons = STICKER_OPTIONS.map((emoji) => {
+  // Helper to create a sticker button for the provided emoji.
+  const createStickerButton = (emoji: string): HTMLButtonElement => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "tool-button";
     button.textContent = emoji;
     button.setAttribute("aria-label", `${emoji} sticker`);
+    return button;
+  };
+
+  // Build all starter stickers from the single STICKER_OPTIONS array.
+  const stickerButtons = STICKER_OPTIONS.map((emoji) => {
+    const button = createStickerButton(emoji);
     stickerGroup.append(button);
     return button;
   });
+
+  // A dedicated control lets the user add their own sticker emoji on demand.
+  const customStickerButton = document.createElement("button");
+  customStickerButton.id = "custom-sticker-button";
+  customStickerButton.type = "button";
+  customStickerButton.className = "tool-button";
+  customStickerButton.textContent = "Custom Sticker";
+  customStickerButton.setAttribute("aria-label", "Create custom sticker");
+  stickerGroup.append(customStickerButton);
 
   const clearButton = document.createElement("button");
   clearButton.id = "clear-button";
@@ -256,6 +278,8 @@ const createControls = (): {
     thinButton,
     thickButton,
     stickerButtons,
+    customStickerButton,
+    stickerGroup,
   };
 };
 
@@ -275,6 +299,8 @@ const initializeLayout = (): PaintAppElements => {
     thinButton,
     thickButton,
     stickerButtons,
+    customStickerButton,
+    stickerGroup,
   } = createControls();
 
   const canvasContainer = document.createElement("div");
@@ -300,6 +326,8 @@ const initializeLayout = (): PaintAppElements => {
     thinButton,
     thickButton,
     stickerButtons,
+    customStickerButton,
+    stickerGroup,
   };
 };
 
@@ -334,13 +362,20 @@ const attachToolSelector = (
   thickButton: HTMLButtonElement,
   stickerButtons: HTMLButtonElement[],
   previewState: ToolPreviewState,
-): () => PaintTool => {
+): {
+  getActiveTool: () => PaintTool;
+  registerStickerButton: (button: HTMLButtonElement, emoji: string) => void;
+} => {
   const selection: ToolSelection = {
     activeTool: { type: "marker", thickness: THIN_MARKER_THICKNESS },
   };
 
+  // Track all sticker buttons so dynamically added stickers can reuse the
+  // same styling and selection behavior.
+  const stickerRegistry = [...stickerButtons];
+
   const applySelectionStyles = (activeButton: HTMLButtonElement): void => {
-    const buttons = [thinButton, thickButton, ...stickerButtons];
+    const buttons = [thinButton, thickButton, ...stickerRegistry];
     buttons.forEach((button) => {
       const isActive = button === activeButton;
       button.classList.toggle("selected-tool", isActive);
@@ -370,13 +405,48 @@ const attachToolSelector = (
     });
   });
 
-  stickerButtons.forEach((button) => {
+  const registerStickerButton = (
+    button: HTMLButtonElement,
+    emoji: string,
+  ): void => {
+    stickerRegistry.push(button);
     button.addEventListener("click", () => {
-      chooseTool(button, { type: "sticker", emoji: button.textContent ?? "" });
+      chooseTool(button, { type: "sticker", emoji });
     });
+  };
+
+  stickerButtons.forEach((button) => {
+    registerStickerButton(button, button.textContent ?? "");
   });
 
-  return () => selection.activeTool;
+  return {
+    getActiveTool: () => selection.activeTool,
+    registerStickerButton,
+  };
+};
+
+// Allow the user to add new sticker buttons using a simple prompt-based flow.
+const attachCustomStickerHandler = (
+  button: HTMLButtonElement,
+  stickerGroup: HTMLDivElement,
+  registerStickerButton: (button: HTMLButtonElement, emoji: string) => void,
+): void => {
+  button.addEventListener("click", () => {
+    const userEmoji = prompt("Enter an emoji or text for your sticker:", "😀");
+    if (!userEmoji) return;
+
+    const trimmedEmoji = userEmoji.trim();
+    if (trimmedEmoji === "") return;
+
+    const newButton = document.createElement("button");
+    newButton.type = "button";
+    newButton.className = "tool-button";
+    newButton.textContent = trimmedEmoji;
+    newButton.setAttribute("aria-label", `${trimmedEmoji} sticker`);
+
+    stickerGroup.append(newButton);
+    registerStickerButton(newButton, trimmedEmoji);
+  });
 };
 
 // Attach mouse listeners that record points into the drawing model.
@@ -525,6 +595,8 @@ const main = (): void => {
     thinButton,
     thickButton,
     stickerButtons,
+    customStickerButton,
+    stickerGroup,
   } = initializeLayout();
   const context = canvas.getContext("2d");
 
@@ -535,12 +607,18 @@ const main = (): void => {
   const model: DrawingModel = { commands: [], redoStack: [] };
   const interaction: InteractionState = { isDrawing: false };
   const previewState = createToolPreviewState();
-  const getActiveTool = attachToolSelector(
+  const { getActiveTool, registerStickerButton } = attachToolSelector(
     canvas,
     thinButton,
     thickButton,
     stickerButtons,
     previewState,
+  );
+
+  attachCustomStickerHandler(
+    customStickerButton,
+    stickerGroup,
+    registerStickerButton,
   );
 
   enableDrawing(canvas, model, getActiveTool, interaction, previewState);
