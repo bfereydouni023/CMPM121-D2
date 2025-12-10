@@ -21,14 +21,51 @@ interface Point {
   y: number;
 }
 
-// A stroke is a list of points captured during a single drag gesture.
-type Stroke = Point[];
-
-// Collection of all recorded strokes.
-interface DrawingModel {
-  strokes: Stroke[];
-  redoStack: Stroke[];
+// Any drawable instruction that knows how to paint itself onto the canvas.
+interface DrawCommand {
+  display: (context: CanvasRenderingContext2D) => void;
 }
+
+// Specialized draw command that records freehand marker strokes.
+// The drag method grows the line with additional positions as the user moves.
+interface MarkerLine extends DrawCommand {
+  drag: (x: number, y: number) => void;
+}
+
+// Collection of all recorded draw commands.
+interface DrawingModel {
+  commands: MarkerLine[];
+  redoStack: MarkerLine[];
+}
+
+// Factory that produces a marker line command backed by a list of recorded points.
+// The returned object exposes a drag method to extend the line and a display method
+// that knows how to render itself with the active canvas context state.
+const createMarkerLine = (initialPoint: Point): MarkerLine => {
+  const points: Point[] = [initialPoint];
+
+  return {
+    drag: (x: number, y: number): void => {
+      points.push({ x, y });
+    },
+    display: (context: CanvasRenderingContext2D): void => {
+      if (points.length === 0) return;
+
+      context.beginPath();
+      const [first, ...rest] = points;
+      context.moveTo(first.x, first.y);
+      if (rest.length === 0) {
+        context.lineTo(first.x, first.y);
+      } else {
+        rest.forEach(({ x, y }) => {
+          context.lineTo(x, y);
+        });
+      }
+      context.stroke();
+      context.closePath();
+    },
+  };
+};
 
 // Builds the heading element that labels the program in browser.
 const createTitle = (text: string): HTMLHeadingElement => {
@@ -123,15 +160,15 @@ const enableDrawing = (
     // Starting a new stroke invalidates redo history, so reset it here.
     model.redoStack.length = 0;
 
-    model.strokes.push([firstPoint]);
+    model.commands.push(createMarkerLine(firstPoint));
     canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
   };
 
   const continueStroke = (event: MouseEvent): void => {
     if (!interaction.isDrawing) return;
     const point = toCanvasPoint(canvas, event);
-    const currentStroke = model.strokes[model.strokes.length - 1];
-    currentStroke.push(point);
+    const currentStroke = model.commands[model.commands.length - 1];
+    currentStroke.drag(point.x, point.y);
     canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
   };
 
@@ -145,7 +182,7 @@ const enableDrawing = (
   canvas.addEventListener("mouseleave", stopDrawing);
 };
 
-// Redraw the full set of strokes whenever the model reports a change.
+// Redraw the full set of draw commands whenever the model reports a change.
 const attachDrawingObserver = (
   canvas: HTMLCanvasElement,
   context: CanvasRenderingContext2D,
@@ -162,20 +199,8 @@ const attachDrawingObserver = (
     context.clearRect(0, 0, canvas.width, canvas.height);
     applyStrokeStyle();
 
-    model.strokes.forEach((stroke) => {
-      if (stroke.length === 0) return;
-      context.beginPath();
-      const [first, ...rest] = stroke;
-      context.moveTo(first.x, first.y);
-      if (rest.length === 0) {
-        context.lineTo(first.x, first.y);
-      } else {
-        rest.forEach(({ x, y }) => {
-          context.lineTo(x, y);
-        });
-      }
-      context.stroke();
-      context.closePath();
+    model.commands.forEach((command) => {
+      command.display(context);
     });
   };
 
@@ -189,7 +214,7 @@ const attachClearHandler = (
   model: DrawingModel,
 ): void => {
   button.addEventListener("click", () => {
-    model.strokes.length = 0;
+    model.commands.length = 0;
     model.redoStack.length = 0;
     canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
   });
@@ -202,19 +227,19 @@ const attachUndoRedoHandlers = (
   canvas: HTMLCanvasElement,
   model: DrawingModel,
 ): void => {
-  // Move the most recent stroke to the redo stack and refresh the canvas.
+  // Move the most recent command to the redo stack and refresh the canvas.
   undoButton.addEventListener("click", () => {
-    const undoneStroke = model.strokes.pop();
-    if (!undoneStroke) return;
-    model.redoStack.push(undoneStroke);
+    const undoneCommand = model.commands.pop();
+    if (!undoneCommand) return;
+    model.redoStack.push(undoneCommand);
     canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
   });
 
-  // Restore the most recently undone stroke to the main history and redraw.
+  // Restore the most recently undone command to the main history and redraw.
   redoButton.addEventListener("click", () => {
-    const restoredStroke = model.redoStack.pop();
-    if (!restoredStroke) return;
-    model.strokes.push(restoredStroke);
+    const restoredCommand = model.redoStack.pop();
+    if (!restoredCommand) return;
+    model.commands.push(restoredCommand);
     canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
   });
 };
@@ -228,7 +253,7 @@ const main = (): void => {
     throw new Error("Canvas 2D context unavailable.");
   }
 
-  const model: DrawingModel = { strokes: [], redoStack: [] };
+  const model: DrawingModel = { commands: [], redoStack: [] };
 
   enableDrawing(canvas, model);
   attachDrawingObserver(canvas, context, model);
