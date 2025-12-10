@@ -53,7 +53,7 @@ body {
 }
 
 .tool-button:hover {
-  background-color: #f3f4f6;
+  background-color: #adadae;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
@@ -64,8 +64,8 @@ body {
 
 /* Highlight the active marker tool. */
 .selected-tool {
-  background-color: #111827;
-  color: #f9fafb;
+  background-color: #99ed24;
+  color: #0c0d0e;
   box-shadow: 0 6px 14px rgba(0, 0, 0, 0.16);
 }
 
@@ -74,7 +74,7 @@ body {
   padding: 10px 14px;
   border: 1px solid #111827;
   border-radius: 8px;
-  background-color: #111827;
+  background-color: #f53628;
   color: #f9fafb;
   font-weight: 600;
   cursor: pointer;
