@@ -4,6 +4,9 @@ import "./style.css";
 interface PaintAppElements {
   root: HTMLElement;
   title: HTMLHeadingElement;
+  layout: HTMLDivElement;
+  toolColumn: HTMLDivElement;
+  canvasContainer: HTMLDivElement;
   canvas: HTMLCanvasElement;
   clearButton: HTMLButtonElement;
   undoButton: HTMLButtonElement;
@@ -181,7 +184,8 @@ const createCanvas = (size: number): HTMLCanvasElement => {
 
 // Container that holds paint controls.
 const createControls = (): {
-  controls: HTMLDivElement;
+  toolColumn: HTMLDivElement;
+  actionRow: HTMLDivElement;
   clearButton: HTMLButtonElement;
   undoButton: HTMLButtonElement;
   redoButton: HTMLButtonElement;
@@ -189,8 +193,8 @@ const createControls = (): {
   thickButton: HTMLButtonElement;
   stickerButtons: HTMLButtonElement[];
 } => {
-  const controls = document.createElement("div");
-  controls.id = "controls";
+  const toolColumn = document.createElement("div");
+  toolColumn.id = "tool-column";
 
   const toolGroup = document.createElement("div");
   toolGroup.id = "tool-group";
@@ -237,10 +241,15 @@ const createControls = (): {
   redoButton.type = "button";
   redoButton.textContent = "Redo";
 
-  controls.append(toolGroup, stickerGroup, clearButton, undoButton, redoButton);
+  const actionRow = document.createElement("div");
+  actionRow.id = "action-row";
+  actionRow.append(undoButton, redoButton, clearButton);
+
+  toolColumn.append(toolGroup, stickerGroup);
 
   return {
-    controls,
+    toolColumn,
+    actionRow,
     clearButton,
     undoButton,
     redoButton,
@@ -258,7 +267,8 @@ const initializeLayout = (): PaintAppElements => {
   const title = createTitle(APP_TITLE);
   const canvas = createCanvas(CANVAS_SIZE);
   const {
-    controls,
+    toolColumn,
+    actionRow,
     clearButton,
     undoButton,
     redoButton,
@@ -267,11 +277,22 @@ const initializeLayout = (): PaintAppElements => {
     stickerButtons,
   } = createControls();
 
-  root.append(title, controls, canvas);
+  const canvasContainer = document.createElement("div");
+  canvasContainer.id = "canvas-container";
+  canvasContainer.append(canvas, actionRow);
+
+  const layout = document.createElement("div");
+  layout.id = "app-layout";
+  layout.append(toolColumn, canvasContainer);
+
+  root.append(title, layout);
 
   return {
     root,
     title,
+    layout,
+    toolColumn,
+    canvasContainer,
     canvas,
     clearButton,
     undoButton,

@@ -12,8 +12,8 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
-  padding: 32px 16px 48px;
+  gap: 24px;
+  padding: 32px 16px 64px;
   box-sizing: border-box;
 }
 
@@ -24,23 +24,48 @@ body {
   letter-spacing: 0.02em;
 }
 
-/* Toolbar area that holds paint actions such as clearing the canvas. */
-#controls {
+/* Overall layout that positions tools to the left of the canvas. */
+#app-layout {
   display: flex;
-  gap: 10px;
-  align-items: center;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+/* Sidebar column that stacks tool buttons. */
+#tool-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 /* Group that holds the marker selection buttons. */
 #tool-group {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 10px;
 }
 
-/* Row of sticker buttons grouped separately from markers. */
+/* sticker buttons grouped separately from markers. */
 #sticker-group {
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Wraps the canvas and aligns action buttons to the bottom-right. */
+#canvas-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+/* Undo/redo/clear row placed beneath the canvas. */
+#action-row {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  width: 100%;
 }
 
 /* Shared styling for selectable marker buttons. */
