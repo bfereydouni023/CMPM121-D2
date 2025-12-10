@@ -8,12 +8,16 @@ interface PaintAppElements {
   clearButton: HTMLButtonElement;
   undoButton: HTMLButtonElement;
   redoButton: HTMLButtonElement;
+  thinButton: HTMLButtonElement;
+  thickButton: HTMLButtonElement;
 }
 
 // Basic configuration values for the UI.
 const APP_TITLE = "Browser Paint Tool";
 const CANVAS_SIZE = 256;
 const DRAWING_CHANGED_EVENT = "drawing-changed";
+const THIN_MARKER_THICKNESS = 4;
+const THICK_MARKER_THICKNESS = 10;
 
 // Represent a point recorded from the user's cursor.
 interface Point {
@@ -41,7 +45,10 @@ interface DrawingModel {
 // Factory that produces a marker line command backed by a list of recorded points.
 // The returned object exposes a drag method to extend the line and a display method
 // that knows how to render itself with the active canvas context state.
-const createMarkerLine = (initialPoint: Point): MarkerLine => {
+const createMarkerLine = (
+  initialPoint: Point,
+  thickness: number,
+): MarkerLine => {
   const points: Point[] = [initialPoint];
 
   return {
@@ -50,6 +57,12 @@ const createMarkerLine = (initialPoint: Point): MarkerLine => {
     },
     display: (context: CanvasRenderingContext2D): void => {
       if (points.length === 0) return;
+
+      // Apply per-stroke styling so each marker tool can render at its own width.
+      context.save();
+      context.lineWidth = thickness;
+      context.lineCap = "round";
+      context.strokeStyle = "#111827";
 
       context.beginPath();
       const [first, ...rest] = points;
@@ -63,6 +76,8 @@ const createMarkerLine = (initialPoint: Point): MarkerLine => {
       }
       context.stroke();
       context.closePath();
+
+      context.restore();
     },
   };
 };
@@ -91,9 +106,28 @@ const createControls = (): {
   clearButton: HTMLButtonElement;
   undoButton: HTMLButtonElement;
   redoButton: HTMLButtonElement;
+  thinButton: HTMLButtonElement;
+  thickButton: HTMLButtonElement;
 } => {
   const controls = document.createElement("div");
   controls.id = "controls";
+
+  const toolGroup = document.createElement("div");
+  toolGroup.id = "tool-group";
+
+  const thinButton = document.createElement("button");
+  thinButton.id = "thin-button";
+  thinButton.type = "button";
+  thinButton.textContent = "Thin Marker";
+  thinButton.className = "tool-button";
+
+  const thickButton = document.createElement("button");
+  thickButton.id = "thick-button";
+  thickButton.type = "button";
+  thickButton.textContent = "Thick Marker";
+  thickButton.className = "tool-button";
+
+  toolGroup.append(thinButton, thickButton);
 
   const clearButton = document.createElement("button");
   clearButton.id = "clear-button";
@@ -110,9 +144,16 @@ const createControls = (): {
   redoButton.type = "button";
   redoButton.textContent = "Redo";
 
-  controls.append(clearButton, undoButton, redoButton);
+  controls.append(toolGroup, clearButton, undoButton, redoButton);
 
-  return { controls, clearButton, undoButton, redoButton };
+  return {
+    controls,
+    clearButton,
+    undoButton,
+    redoButton,
+    thinButton,
+    thickButton,
+  };
 };
 
 // Assemble the page layout and return references to the created elements.
@@ -122,16 +163,37 @@ const initializeLayout = (): PaintAppElements => {
 
   const title = createTitle(APP_TITLE);
   const canvas = createCanvas(CANVAS_SIZE);
-  const { controls, clearButton, undoButton, redoButton } = createControls();
+  const {
+    controls,
+    clearButton,
+    undoButton,
+    redoButton,
+    thinButton,
+    thickButton,
+  } = createControls();
 
   root.append(title, controls, canvas);
 
-  return { root, title, canvas, clearButton, undoButton, redoButton };
+  return {
+    root,
+    title,
+    canvas,
+    clearButton,
+    undoButton,
+    redoButton,
+    thinButton,
+    thickButton,
+  };
 };
 
 // Track whether the user is currently dragging the mouse to record a stroke.
 interface InteractionState {
   isDrawing: boolean;
+}
+
+// Shared tool selection state that tracks which marker thickness is active.
+interface ToolSelection {
+  activeThickness: number;
 }
 
 // Convert a mouse event's location to canvas-relative coordinates.
@@ -146,10 +208,48 @@ const toCanvasPoint = (
   };
 };
 
+// Set up the marker tool buttons and return a callback that reports the current
+// thickness. Each button click updates the stored value and the visual
+// selection state.
+const attachToolSelector = (
+  thinButton: HTMLButtonElement,
+  thickButton: HTMLButtonElement,
+): () => number => {
+  const selection: ToolSelection = {
+    activeThickness: THIN_MARKER_THICKNESS,
+  };
+
+  const applySelectionStyles = (activeButton: HTMLButtonElement): void => {
+    const buttons = [thinButton, thickButton];
+    buttons.forEach((button) => {
+      const isActive = button === activeButton;
+      button.classList.toggle("selected-tool", isActive);
+    });
+  };
+
+  const chooseTool = (button: HTMLButtonElement, thickness: number): void => {
+    selection.activeThickness = thickness;
+    applySelectionStyles(button);
+  };
+
+  chooseTool(thinButton, THIN_MARKER_THICKNESS);
+
+  thinButton.addEventListener("click", () => {
+    chooseTool(thinButton, THIN_MARKER_THICKNESS);
+  });
+
+  thickButton.addEventListener("click", () => {
+    chooseTool(thickButton, THICK_MARKER_THICKNESS);
+  });
+
+  return () => selection.activeThickness;
+};
+
 // Attach mouse listeners that record points into the drawing model.
 const enableDrawing = (
   canvas: HTMLCanvasElement,
   model: DrawingModel,
+  getActiveThickness: () => number,
 ): void => {
   const interaction: InteractionState = { isDrawing: false };
 
@@ -160,7 +260,7 @@ const enableDrawing = (
     // Starting a new stroke invalidates redo history, so reset it here.
     model.redoStack.length = 0;
 
-    model.commands.push(createMarkerLine(firstPoint));
+    model.commands.push(createMarkerLine(firstPoint, getActiveThickness()));
     canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
   };
 
@@ -188,16 +288,8 @@ const attachDrawingObserver = (
   context: CanvasRenderingContext2D,
   model: DrawingModel,
 ): void => {
-  // Shared stroke styling for all segments.
-  const applyStrokeStyle = (): void => {
-    context.lineWidth = 4;
-    context.lineCap = "round";
-    context.strokeStyle = "#111827";
-  };
-
   const render = (): void => {
     context.clearRect(0, 0, canvas.width, canvas.height);
-    applyStrokeStyle();
 
     model.commands.forEach((command) => {
       command.display(context);
@@ -246,7 +338,14 @@ const attachUndoRedoHandlers = (
 
 // starts the UI creation and register paint behavior when the module loads.
 const main = (): void => {
-  const { canvas, clearButton, undoButton, redoButton } = initializeLayout();
+  const {
+    canvas,
+    clearButton,
+    undoButton,
+    redoButton,
+    thinButton,
+    thickButton,
+  } = initializeLayout();
   const context = canvas.getContext("2d");
 
   if (!context) {
@@ -254,8 +353,9 @@ const main = (): void => {
   }
 
   const model: DrawingModel = { commands: [], redoStack: [] };
+  const getActiveThickness = attachToolSelector(thinButton, thickButton);
 
-  enableDrawing(canvas, model);
+  enableDrawing(canvas, model, getActiveThickness);
   attachDrawingObserver(canvas, context, model);
   attachClearHandler(clearButton, canvas, model);
   attachUndoRedoHandlers(undoButton, redoButton, canvas, model);
