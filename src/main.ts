@@ -9,6 +9,7 @@ interface PaintAppElements {
   canvasContainer: HTMLDivElement;
   canvas: HTMLCanvasElement;
   clearButton: HTMLButtonElement;
+  exportButton: HTMLButtonElement;
   undoButton: HTMLButtonElement;
   redoButton: HTMLButtonElement;
   thinButton: HTMLButtonElement;
@@ -21,6 +22,7 @@ interface PaintAppElements {
 // Basic configuration values for the UI.
 const APP_TITLE = "Browser Paint Tool";
 const CANVAS_SIZE = 256;
+const EXPORT_CANVAS_SIZE = 1024;
 const DRAWING_CHANGED_EVENT = "drawing-changed";
 const TOOL_MOVED_EVENT = "tool-moved";
 const THIN_MARKER_THICKNESS = 4;
@@ -191,6 +193,7 @@ const createControls = (): {
   toolColumn: HTMLDivElement;
   actionRow: HTMLDivElement;
   clearButton: HTMLButtonElement;
+  exportButton: HTMLButtonElement;
   undoButton: HTMLButtonElement;
   redoButton: HTMLButtonElement;
   thinButton: HTMLButtonElement;
@@ -253,6 +256,12 @@ const createControls = (): {
   clearButton.type = "button";
   clearButton.textContent = "Clear Canvas";
 
+  const exportButton = document.createElement("button");
+  exportButton.id = "export-button";
+  exportButton.type = "button";
+  exportButton.textContent = "Export PNG";
+  exportButton.className = "tool-button";
+
   const undoButton = document.createElement("button");
   undoButton.id = "undo-button";
   undoButton.type = "button";
@@ -265,7 +274,7 @@ const createControls = (): {
 
   const actionRow = document.createElement("div");
   actionRow.id = "action-row";
-  actionRow.append(undoButton, redoButton, clearButton);
+  actionRow.append(undoButton, redoButton, clearButton, exportButton);
 
   toolColumn.append(toolGroup, stickerGroup);
 
@@ -273,6 +282,7 @@ const createControls = (): {
     toolColumn,
     actionRow,
     clearButton,
+    exportButton,
     undoButton,
     redoButton,
     thinButton,
@@ -294,6 +304,7 @@ const initializeLayout = (): PaintAppElements => {
     toolColumn,
     actionRow,
     clearButton,
+    exportButton,
     undoButton,
     redoButton,
     thinButton,
@@ -321,6 +332,7 @@ const initializeLayout = (): PaintAppElements => {
     canvasContainer,
     canvas,
     clearButton,
+    exportButton,
     undoButton,
     redoButton,
     thinButton,
@@ -585,11 +597,44 @@ const attachUndoRedoHandlers = (
   });
 };
 
+// Export the current drawing at a higher resolution by replaying commands on a
+// temporary, larger canvas and triggering a PNG download.
+const attachExportHandler = (
+  exportButton: HTMLButtonElement,
+  model: DrawingModel,
+): void => {
+  exportButton.addEventListener("click", () => {
+    // Create a new offscreen canvas sized for export.
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = EXPORT_CANVAS_SIZE;
+    exportCanvas.height = EXPORT_CANVAS_SIZE;
+
+    const exportContext = exportCanvas.getContext("2d");
+    if (!exportContext) return;
+
+    // Scale drawing operations so existing coordinates fill the larger canvas.
+    const scale = EXPORT_CANVAS_SIZE / CANVAS_SIZE;
+    exportContext.scale(scale, scale);
+
+    // Replay every draw command onto the export canvas without previews.
+    model.commands.forEach((command) => {
+      command.display(exportContext);
+    });
+
+    // Produce a PNG data URL and initiate a download for the user.
+    const downloadLink = document.createElement("a");
+    downloadLink.href = exportCanvas.toDataURL("image/png");
+    downloadLink.download = "browser-paint-export.png";
+    downloadLink.click();
+  });
+};
+
 // starts the UI creation and register paint behavior when the module loads.
 const main = (): void => {
   const {
     canvas,
     clearButton,
+    exportButton,
     undoButton,
     redoButton,
     thinButton,
@@ -626,6 +671,7 @@ const main = (): void => {
   attachDrawingObserver(canvas, context, model, previewState);
   attachClearHandler(clearButton, canvas, model);
   attachUndoRedoHandlers(undoButton, redoButton, canvas, model);
+  attachExportHandler(exportButton, model);
 };
 
 // starts the UI creation when the module loads.
