@@ -43,7 +43,7 @@ interface DraggableCommand extends DrawCommand {
   drag: (x: number, y: number) => void;
 }
 
-// Renderable hint shown while hovering the tool, such as an outline or a ghosted sticker.
+// Renderable hint shown while hovering the tool, a ghosted sticker showing at cursor
 interface ToolPreview {
   draw: (context: CanvasRenderingContext2D) => void;
 }
