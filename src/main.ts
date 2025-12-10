@@ -16,6 +16,7 @@ interface PaintAppElements {
 const APP_TITLE = "Browser Paint Tool";
 const CANVAS_SIZE = 256;
 const DRAWING_CHANGED_EVENT = "drawing-changed";
+const TOOL_MOVED_EVENT = "tool-moved";
 const THIN_MARKER_THICKNESS = 4;
 const THICK_MARKER_THICKNESS = 10;
 
@@ -30,6 +31,11 @@ interface DrawCommand {
   display: (context: CanvasRenderingContext2D) => void;
 }
 
+// Renderable hint shown while hovering the tool, an outline of the marker size.
+interface ToolPreview {
+  draw: (context: CanvasRenderingContext2D) => void;
+}
+
 // Specialized draw command that records freehand marker strokes.
 // The drag method grows the line with additional positions as the user moves.
 interface MarkerLine extends DrawCommand {
@@ -40,6 +46,11 @@ interface MarkerLine extends DrawCommand {
 interface DrawingModel {
   commands: MarkerLine[];
   redoStack: MarkerLine[];
+}
+
+// Stores the current preview renderer so the UI can redraw it as the cursor moves.
+interface ToolPreviewState {
+  active: ToolPreview | null;
 }
 
 // Factory that produces a marker line command backed by a list of recorded points.
@@ -81,6 +92,27 @@ const createMarkerLine = (
     },
   };
 };
+
+// Factory for the hover preview; draws a simple outline circle matching the marker size.
+const createMarkerPreview = (point: Point, thickness: number): ToolPreview => ({
+  draw: (context: CanvasRenderingContext2D): void => {
+    context.save();
+
+    // A light outline shows the user how thick the next stroke will be without adding a line.
+    context.strokeStyle = "#9CA3AF";
+    context.lineWidth = 1;
+    context.beginPath();
+    context.arc(point.x, point.y, thickness / 2, 0, Math.PI * 2);
+    context.stroke();
+
+    context.restore();
+  },
+});
+
+// Holds the active preview renderer so listeners can mutate it without using globals.
+const createToolPreviewState = (): ToolPreviewState => ({
+  active: null,
+});
 
 // Builds the heading element that labels the program in browser.
 const createTitle = (text: string): HTMLHeadingElement => {
@@ -250,11 +282,13 @@ const enableDrawing = (
   canvas: HTMLCanvasElement,
   model: DrawingModel,
   getActiveThickness: () => number,
+  interaction: InteractionState,
+  previewState: ToolPreviewState,
 ): void => {
-  const interaction: InteractionState = { isDrawing: false };
-
   const startDrawing = (event: MouseEvent): void => {
     interaction.isDrawing = true;
+    // Hide hover preview as soon as ink starts flowing.
+    previewState.active = null;
     const firstPoint = toCanvasPoint(canvas, event);
 
     // Starting a new stroke invalidates redo history, so reset it here.
@@ -282,11 +316,40 @@ const enableDrawing = (
   canvas.addEventListener("mouseleave", stopDrawing);
 };
 
+// Updates the hover preview on cursor movement without committing a stroke.
+const attachToolPreview = (
+  canvas: HTMLCanvasElement,
+  getActiveThickness: () => number,
+  interaction: InteractionState,
+  previewState: ToolPreviewState,
+): void => {
+  const updatePreview = (event: MouseEvent): void => {
+    if (interaction.isDrawing) {
+      previewState.active = null;
+      canvas.dispatchEvent(new Event(TOOL_MOVED_EVENT));
+      return;
+    }
+
+    const point = toCanvasPoint(canvas, event);
+    previewState.active = createMarkerPreview(point, getActiveThickness());
+    canvas.dispatchEvent(new Event(TOOL_MOVED_EVENT));
+  };
+
+  const clearPreview = (): void => {
+    previewState.active = null;
+    canvas.dispatchEvent(new Event(TOOL_MOVED_EVENT));
+  };
+
+  canvas.addEventListener("mousemove", updatePreview);
+  canvas.addEventListener("mouseleave", clearPreview);
+};
+
 // Redraw the full set of draw commands whenever the model reports a change.
 const attachDrawingObserver = (
   canvas: HTMLCanvasElement,
   context: CanvasRenderingContext2D,
   model: DrawingModel,
+  previewState: ToolPreviewState,
 ): void => {
   const render = (): void => {
     context.clearRect(0, 0, canvas.width, canvas.height);
@@ -294,9 +357,15 @@ const attachDrawingObserver = (
     model.commands.forEach((command) => {
       command.display(context);
     });
+
+    // Only show the preview when available; drawing commands always take precedence.
+    if (previewState.active) {
+      previewState.active.draw(context);
+    }
   };
 
   canvas.addEventListener(DRAWING_CHANGED_EVENT, render);
+  canvas.addEventListener(TOOL_MOVED_EVENT, render);
 };
 
 // Wire up the clear button to reset the drawing model and refresh the view.
@@ -353,10 +422,13 @@ const main = (): void => {
   }
 
   const model: DrawingModel = { commands: [], redoStack: [] };
+  const interaction: InteractionState = { isDrawing: false };
+  const previewState = createToolPreviewState();
   const getActiveThickness = attachToolSelector(thinButton, thickButton);
 
-  enableDrawing(canvas, model, getActiveThickness);
-  attachDrawingObserver(canvas, context, model);
+  enableDrawing(canvas, model, getActiveThickness, interaction, previewState);
+  attachToolPreview(canvas, getActiveThickness, interaction, previewState);
+  attachDrawingObserver(canvas, context, model, previewState);
   attachClearHandler(clearButton, canvas, model);
   attachUndoRedoHandlers(undoButton, redoButton, canvas, model);
 };
