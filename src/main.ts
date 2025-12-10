@@ -11,6 +11,21 @@ interface PaintAppElements {
 // Basic configuration values for the UI.
 const APP_TITLE = "Browser Paint Tool";
 const CANVAS_SIZE = 256;
+const DRAWING_CHANGED_EVENT = "drawing-changed";
+
+// Represent a point recorded from the user's cursor.
+interface Point {
+  x: number;
+  y: number;
+}
+
+// A stroke is a list of points captured during a single drag gesture.
+type Stroke = Point[];
+
+// Collection of all recorded strokes.
+interface DrawingModel {
+  strokes: Stroke[];
+}
 
 // Build the heading element that labels the program in browser.
 const createTitle = (text: string): HTMLHeadingElement => {
@@ -62,54 +77,47 @@ const initializeLayout = (): PaintAppElements => {
   return { root, title, canvas, clearButton };
 };
 
-// Track current drawing state for mouse interactions.
-interface DrawingState {
+// Track whether the user is currently dragging the mouse to record a stroke.
+interface InteractionState {
   isDrawing: boolean;
-  lastX: number;
-  lastY: number;
 }
 
-// Attach mouse listeners to draw directly onto the canvas.
+// Convert a mouse event's location to canvas-relative coordinates.
+const toCanvasPoint = (
+  canvas: HTMLCanvasElement,
+  event: MouseEvent,
+): Point => {
+  const bounds = canvas.getBoundingClientRect();
+  return {
+    x: event.clientX - bounds.left,
+    y: event.clientY - bounds.top,
+  };
+};
+
+// Attach mouse listeners that record points into the drawing model.
 const enableDrawing = (
   canvas: HTMLCanvasElement,
-  context: CanvasRenderingContext2D,
+  model: DrawingModel,
 ): void => {
-  const state: DrawingState = { isDrawing: false, lastX: 0, lastY: 0 };
-
-  // Configure basic stroke style for the marker tool.
-  context.lineWidth = 4;
-  context.lineCap = "round";
-  context.strokeStyle = "#111827";
-
-  const toCanvasPoint = (event: MouseEvent): { x: number; y: number } => {
-    const bounds = canvas.getBoundingClientRect();
-    return {
-      x: event.clientX - bounds.left,
-      y: event.clientY - bounds.top,
-    };
-  };
+  const interaction: InteractionState = { isDrawing: false };
 
   const startDrawing = (event: MouseEvent): void => {
-    state.isDrawing = true;
-    const point = toCanvasPoint(event);
-    state.lastX = point.x;
-    state.lastY = point.y;
-    context.beginPath();
-    context.moveTo(point.x, point.y);
+    interaction.isDrawing = true;
+    const firstPoint = toCanvasPoint(canvas, event);
+    model.strokes.push([firstPoint]);
+    canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
   };
 
   const continueStroke = (event: MouseEvent): void => {
-    if (!state.isDrawing) return;
-    const point = toCanvasPoint(event);
-    context.lineTo(point.x, point.y);
-    context.stroke();
-    state.lastX = point.x;
-    state.lastY = point.y;
+    if (!interaction.isDrawing) return;
+    const point = toCanvasPoint(canvas, event);
+    const currentStroke = model.strokes[model.strokes.length - 1];
+    currentStroke.push(point);
+    canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
   };
 
   const stopDrawing = (): void => {
-    state.isDrawing = false;
-    context.closePath();
+    interaction.isDrawing = false;
   };
 
   canvas.addEventListener("mousedown", startDrawing);
@@ -118,14 +126,52 @@ const enableDrawing = (
   canvas.addEventListener("mouseleave", stopDrawing);
 };
 
-// Wire up the clear button to reset the drawing surface.
+// Redraw the full set of strokes whenever the model reports a change.
+const attachDrawingObserver = (
+  canvas: HTMLCanvasElement,
+  context: CanvasRenderingContext2D,
+  model: DrawingModel,
+): void => {
+  // Shared stroke styling for all segments.
+  const applyStrokeStyle = (): void => {
+    context.lineWidth = 4;
+    context.lineCap = "round";
+    context.strokeStyle = "#111827";
+  };
+
+  const render = (): void => {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    applyStrokeStyle();
+
+    model.strokes.forEach((stroke) => {
+      if (stroke.length === 0) return;
+      context.beginPath();
+      const [first, ...rest] = stroke;
+      context.moveTo(first.x, first.y);
+      if (rest.length === 0) {
+        context.lineTo(first.x, first.y);
+      } else {
+        rest.forEach(({ x, y }) => {
+          context.lineTo(x, y);
+        });
+      }
+      context.stroke();
+      context.closePath();
+    });
+  };
+
+  canvas.addEventListener(DRAWING_CHANGED_EVENT, render);
+};
+
+// Wire up the clear button to reset the drawing model and refresh the view.
 const attachClearHandler = (
   button: HTMLButtonElement,
   canvas: HTMLCanvasElement,
-  context: CanvasRenderingContext2D,
+  model: DrawingModel,
 ): void => {
   button.addEventListener("click", () => {
-    context.clearRect(0, 0, canvas.width, canvas.height);
+    model.strokes.length = 0;
+    canvas.dispatchEvent(new Event(DRAWING_CHANGED_EVENT));
   });
 };
 
@@ -138,8 +184,11 @@ const main = (): void => {
     throw new Error("Canvas 2D context unavailable.");
   }
 
-  enableDrawing(canvas, context);
-  attachClearHandler(clearButton, canvas, context);
+  const model: DrawingModel = { strokes: [] };
+
+  enableDrawing(canvas, model);
+  attachDrawingObserver(canvas, context, model);
+  attachClearHandler(clearButton, canvas, model);
 };
 
 // Kick off the UI creation when the module loads.
